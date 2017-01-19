@@ -17,11 +17,14 @@ If you have a comment or suggestion, please open an [issue](https://github.com/d
 
 - [Purchase YubiKey](#purchase-yubikey)
 - [Install required software](#install-required-software)
+- [Download Debian Live CD](#download-debian-live-cd)
+- [Disconnect network and run as root](#disconnect-network-and-run-as-root)
 - [Creating keys](#creating-keys)
   - [Create temporary working directory for GPG](#create-temporary-working-directory-for-gpg)
   - [Create configuration](#create-configuration)
   - [Create master key](#create-master-key)
   - [Save Key ID](#save-key-id)
+  - [Adding another identity](#adding-another-identity)
   - [Create revocation certificate](#create-revocation-certificate)
   - [Back up master key](#back-up-master-key)
   - [Create subkeys](#create-subkeys)
@@ -40,7 +43,9 @@ If you have a comment or suggestion, please open an [issue](https://github.com/d
     - [Encryption key](#encryption-key-1)
     - [Authentication key](#authentication-key-1)
   - [Check your work](#check-your-work-1)
+  - [Backup the subkey stubs](#backup-the-subkey-stubs)
   - [Export public key](#export-public-key)
+  - [Setting up a second Yubikey](#setting-up-a-second-yubikey)
   - [Finish](#finish)
 - [Using keys](#using-keys)
   - [Create GPG configuration](#create-gpg-configuration)
@@ -57,6 +62,7 @@ If you have a comment or suggestion, please open an [issue](https://github.com/d
     - [Replace ssh-agent with gpg-agent](#replace-ssh-agent-with-gpg-agent)
     - [Copy public key to server](#copy-public-key-to-server)
     - [Connect with public key authentication](#connect-with-public-key-authentication)
+    - [Using your backup Yubikey](#using-your-backup-yubikey)
 - [Troubleshooting](#troubleshooting)
 - [References](#references)
 
@@ -70,11 +76,25 @@ https://www.amazon.com/Yubico/b/ref=bl_dp_s_web_10358012011?ie=UTF8&node=1035801
 
 Consider purchasing a pair and programming both in case of loss or damage to one of them.
 
+# Download Debian Live CD
+
+To minimize the risk of accidental leakage of the keys, I (as many others) used a Debian Live CD when settings up the keys.
+
+So start with downloading a Debian Live install image from [here](https://www.debian.org/CD/live/) - I used the 8.7.0-amd64 one (with a Gnome desktop). To easily flash the ISO to a USB drive, you can use [Etcher](https://etcher.io/).
+
+If you're booting on a MacBook Pro a tip is to boot the Live CD with a thunderbolt ethernet adapter attached, as then networking will work out of the box. AT least for my hardware there were some problems getting WiFi to work without internet access to download drivers. Having a wired connection also makes it really easy to absolutely cut the connection later in the process if you want an offline machine while generating the keys.  
+
 # Install required software
 
 You will need to install the following software:
 
     $ sudo apt-get install -y gnupg2 gnupg-agent pinentry-curses scdaemon pcscd yubikey-personalization libusb-1.0-0-dev
+
+When booting on the Debian Live CD I also needed the following softwares:
+
+    $ sudo apt-get install -y curl libusb-dev cryptsetup haveged
+
+The last one - `haveged` - is an entropy harvesting daemin that will improve the entropy in th eentropy pool, which will speed up key generation.
 
 You may also need to download and install more recent versions of [yubikey-personalization](https://developers.yubico.com/yubikey-personalization/Releases/) and [yubico-c](https://developers.yubico.com/yubico-c/Releases/):
 
@@ -138,9 +158,15 @@ You may also need to download and install more recent versions of [yubikey-perso
 
     $ sudo ldconfig
 
-If on [Tails](https://tails.boum.org/), you also need to install libykpers-1-1 from the testing repository. This is a temporary fix suggested on a [securedrop issue](https://github.com/freedomofpress/securedrop/issues/1035):
+# Disconnect network and run as root
 
-    $ sudo apt-get install -t testing libykpers-1-1
+To ensure the highets level of security, you should now unplug your network cable and verify that you no longer have network connectivity.
+
+As we're running on a Debian Live CD, non-root users aren't allowed to interact with the Yubikey device, and as this is a temporary session and nothing we'll change will survive a reboot, it's just simpler to run everything as root. Technically speaking, it's just when we're interacting with the key itself that we need to be root, but as we're setting up a few environment variables it's just easier to run the whole thing as root:
+
+    $ sudo su -
+
+If you run the rest of the guide as root, then of course you can skip the `sudo` part of a lot of the commands later in the guide.
 
 # Creating keys
 
@@ -177,7 +203,7 @@ Paste the following [text](https://stackoverflow.com/questions/2500436/how-does-
 
 Generate a new key with GPG, selecting RSA (sign only) and the appropriate keysize, optionally specifying an expiry:
 
-    $ gpg --gen-key
+    $ gpg2 --gen-key
 
     Please select what kind of key you want:
        (1) RSA and RSA (default)
@@ -232,11 +258,63 @@ Export the key ID as a [variable](https://stackoverflow.com/questions/1158091/de
 
     $ KEYID=0xFF3E7D88647EBCDB
 
+## Adding another identity
+
+As I have a couple of email addresses I use, it's necessary to make the GPG key reflect this as well. In the following steps we'll first add another email address *(I actually repeated that step twice, so I have three email addresses registered),* and then we use the `primary` command to specify the main User ID:
+
+    $ gpg2 --edit-key $KEYID
+
+    Secret key is available.
+
+    pub  4096R/647EBCDB  created: 2016-05-24  expires: never       usage: SC  
+                        trust: ultimate      validity: ultimate
+    [ultimate] (1). Dr Duh
+
+    gpg> adduid
+    Real name: Dr Duh
+    Email address: another.doc@duh.to
+    Comment: 
+    You selected this USER-ID:
+        "Dr Duh"
+
+    Change (N)ame, (C)omment, (E)mail or (O)kay/(Q)uit? o
+
+    You need a passphrase to unlock the secret key for
+    user: "Dr Duh"
+    4096-bit RSA key, ID 647EBCDB, created 2016-05-24
+
+
+    pub  4096R/647EBCDB  created: 2016-05-24  expires: never       usage: SC  
+                        trust: ultimate      validity: ultimate
+    [ultimate] (1)  Dr Duh 
+    [ unknown] (2). Dr Duh 
+
+    gpg> uid 1
+
+    pub  4096R/647EBCDB  created: 2016-05-24  expires: never       usage: SC  
+                        trust: ultimate      validity: ultimate
+    [ultimate] (1)* Dr Duh 
+    [ unknown] (2). Dr Duh 
+
+    gpg> primary
+
+    You need a passphrase to unlock the secret key for
+    user: "Dr Duh"
+    4096-bit RSA key, ID 647EBCDB, created 2016-05-24
+
+
+    pub  4096R/647EBCDB  created: 2016-05-24  expires: never       usage: SC  
+                        trust: ultimate      validity: ultimate
+    [ultimate] (1)* Dr Duh 
+    [ unknown] (2)  Dr Duh 
+
+    gpg> save
+
 ## Create revocation certificate
 
 Create a way to revoke your keys in case of loss or compromise, an explicit reason being optional:
 
-    $ gpg --gen-revoke $KEYID > $GNUPGHOME/revoke.txt
+    $ gpg2 --gen-revoke $KEYID > $GNUPGHOME/revoke.txt
 
     sec  4096R/0xFF3E7D88647EBCDB 2016-05-24 Dr Duh <doc@duh.to>
 
@@ -272,13 +350,13 @@ Create a way to revoke your keys in case of loss or compromise, an explicit reas
 
 Save a copy of the private key block:
 
-    $ gpg --armor --export-secret-keys $KEYID > $GNUPGHOME/master.key
+    $ gpg2 --armor --export-secret-keys $KEYID > $GNUPGHOME/master.key
 
 ## Create subkeys
 
 Edit the key to add subkeys:
 
-    $ gpg --expert --edit-key $KEYID
+    $ gpg2 --expert --edit-key $KEYID
 
     Secret key is available.
 
@@ -470,7 +548,7 @@ Finally, create an [authentication key](https://superuser.com/questions/390265/w
 
 List your new secret keys:
 
-    $ gpg --list-secret-keys
+    $ gpg2 --list-secret-keys
     /tmp/tmp.aaiTTovYgo/secring.gpg
     -------------------------------
     sec   4096R/0xFF3E7D88647EBCDB 2016-05-24
@@ -495,9 +573,9 @@ The output will display any problems with your key in red text. If everything is
 
 Save a copy of your subkeys:
 
-    $ gpg --armor --export-secret-keys $KEYID > $GNUPGHOME/mastersub.key
+    $ gpg2 --armor --export-secret-keys $KEYID > $GNUPGHOME/mastersub.key
 
-    $ gpg --armor --export-secret-subkeys $KEYID > $GNUPGHOME/sub.key
+    $ gpg2 --armor --export-secret-subkeys $KEYID > $GNUPGHOME/sub.key
     
 ## Back up everything
 
@@ -612,7 +690,9 @@ Finally, copy files to it:
     ‘/tmp/tmp.aaiTTovYgo/pubring.gpg~’ -> ‘/mnt/usb/tmp.aaiTTovYgo/pubring.gpg~’
     ‘/tmp/tmp.aaiTTovYgo/pubring.gpg’ -> ‘/mnt/usb/tmp.aaiTTovYgo/pubring.gpg’
 
-Make sure the correct files were copied, then unmount and disconnected the encrypted USB drive:
+Make sure the correct files were copied!
+
+There's an optional step later to export the subkey stubs after you've transferred your keys to the Yubikey. In case you want to do that, you might as well leave the USB drive mounted and disconnect it later. In case you don't want to backup the stubs, you might as well unmount and disconnected the encrypted USB drive now:
 
     $ sudo umount /mnt/usb
     $ sudo cryptsetup luksClose encrypted-usb
@@ -621,14 +701,16 @@ Make sure the correct files were copied, then unmount and disconnected the encry
 
 Plug in your YubiKey and configure it:
 
-    $ ykpersonalize -m82
+    $ ykpersonalize -m86
     Firmware version 4.2.7 Touch level 527 Program sequence 4
 
-    The USB mode will be set to: 0x82
+    The USB mode will be set to: 0x86
 
     Commit? (y/n) [n]: y
 
-> The -m option is the mode command. To see the different modes, enter ykpersonalize –help. Mode 82 (in hex) enables the YubiKey NEO as a composite USB device (HID + CCID) and allows OTPs to be emitted while in use as a smart card.  Once you have changed the mode, you need to re-boot the YubiKey – so remove and re-insert it.
+> The -m option is the mode command. To see the different modes, enter ykpersonalize –help. Mode 86 (in hex) enables the YubiKey as a composite USB device (HID + CCID + U2F) and allows OTPs to be emitted while in use as a smart card.  Once you have changed the mode, you need to re-boot the YubiKey – so remove and re-insert it.
+
+> **In case you don't want U2F, you can use mode 82 instead (HID + CCID)!**
 
 https://www.yubico.com/2012/12/yubikey-neo-openpgp/
 
@@ -636,7 +718,7 @@ https://www.yubico.com/2012/12/yubikey-neo-openpgp/
 
 Use GPG to configure YubiKey as a smartcard:
 
-    $ gpg --card-edit
+    $ gpg2 --card-edit
 
     Application ID ...: D2760001240102010006055532110000
     Version ..........: 2.1
@@ -743,7 +825,7 @@ Some fields are optional:
 
 Transfering keys to YubiKey hardware is a one-way operation only, so make sure you've made a backup before proceeding:
 
-    $ gpg --edit-key $KEYID
+    $ gpg2 --edit-key $KEYID
 
     Secret key is available.
 
@@ -897,7 +979,7 @@ Save and quit:
 
 `ssb>` indicates a stub to the private key on smartcard:
 
-    $ gpg --list-secret-keys
+    $ gpg2 --list-secret-keys
     /tmp/tmp.aaiTTovYgo/secring.gpg
     -------------------------------
     sec   4096R/0xFF3E7D88647EBCDB 2016-05-24
@@ -907,25 +989,54 @@ Save and quit:
     ssb>  4096R/0x5912A795E90DD2CF 2016-05-24
     ssb>  4096R/0x3F29127E79649A3D 2016-05-24
 
+## Backup the subkey stubs
+
+As you can see in the output abovem the subkeys are now marked with `ssb>`, indicating that they are stubs for a smartcard key. If you want to you can also make a backup of these stubs.
+
+In case you've left the USB mounted you can simply export them directly to the drive:
+
+    $ gpg2 --armor --export-secret-keys $KEYID > /mnt/usb/masterstubs.txt
+    $ gpg2 --armor --export-secret-subkeys $KEYID > /mnt/usb/subkeysstubs.txt
+    $ gpg2 --armor --export $KEYID > /mnt/usb/publickey.txt
+
+Or you could export them elsewhere (e.g. `$GNUPGHOME`) and copy them to the USB drive after you've reconnected it. Either way, once you've finished make sure you unmount the drive completely:
+
+    $ sudo umount /mnt/usb
+    $ sudo cryptsetup luksClose encrypted-usb
+
 ## Export public key
 
 This file should be publicly shared:
 
-    $ gpg --armor --export $KEYID > /mnt/public-usb-key/pubkey.txt
+    $ gpg2 --armor --export $KEYID > /mnt/public-usb-key/pubkey.txt
 
 Optionally, it may be uploaded to a [public keyserver](https://debian-administration.org/article/451/Submitting_your_GPG_key_to_a_keyserver):
 
-    $ gpg --send-key $KEYID
+    $ gpg2 --send-key $KEYID
     gpg: sending key 0xFF3E7D88647EBCDB to hkps server hkps.pool.sks-keyservers.net
     [...]
 
 After a little while, it ought to propagate to [other](https://pgp.key-server.io/pks/lookup?search=doc%40duh.to&fingerprint=on&op=vindex) [servers](https://pgp.mit.edu/pks/lookup?search=doc%40duh.to&op=index).
+
+## Setting up a second Yubikey
+
+As I wanted to set up two Yubikeys at the same time, I wasn't quite what would be the best way of doing this. Either I could setup the second Yubikey with completely separate subkeys generated from my master key, but apparently this can create troubles for GPG. The other alternative was to copy the exact same subkeys to the second Yubikey, essentially making it a clone.
+
+As the purpose of my second Yubikey was to have a backup in case I lost the first one, I decided to follow the latter and make it a clone. In case I would lose my primary Yubikey, I can use the backup to quickly gain access all my services without always having to remember to register two keys. Of course if I lost the primary key, I would only use the backup as a temporary solution until I've sorted out a new primary key and disabled the original one (and it's backup).
+
+> Keep in mind that if you're using U2F, both the primary and the backup Yubikeys will still be handled as separated devices, and needs to be registered individually!
+
+As we've already transferred the subkeys to the primary Yubikey, we can transfer them again to the backup. One way to work around this problem is to delete the subkey that has been transferred from your keyring, and then reimport the original one. I took a very lo-fi approach to all this - I simply erased the whole `.gnupg` directory and then copied the backup from the USB drive back into place.
+
+After restoring your backup you are ready to repeat all the steps from [Configure YubiKey](#configure-yubikey) on onwards for your second Yubikey.
 
 ## Finish
 
 If all went well, you should now reboot or [securely delete](http://srm.sourceforge.net/) `$GNUPGHOME`.
 
 # Using keys
+
+Now you can shutdown or reboot the machine with the Live CD, and switch to your daily computer instead...
 
 ## Create GPG configuration 
 
@@ -1248,6 +1359,12 @@ There is a `-L` option of `ssh-add` that lists public key parameters of all iden
     debug1: Authentication succeeded (publickey).
     [...]
 
+### Using your backup Yubikey
+
+In case you have a second Yubikey with the same secret keys as your primary one, you can't simply use the backup Yubikey as a drop-in replacement - gpg-agent will complain that you should replace your smart card with the original one.
+
+However, there's a really simple solution to this in case you need to switch to your backup. In the directory `~/.gnupg/private-keys-v1.d/` you'll have a `.key` file with the ID of your smart card. Simply delete it and then restart the gpg-agent (open a new shell) and you should be able to use the second Yubikey instead. Keep in mind that if you need to switch back to the original key again, you'll have to go through this process another time...
+
 # Troubleshooting
 
 - If you don't understand some option, read `man gpg`.
@@ -1296,3 +1413,4 @@ There is a `-L` option of `ssh-add` that lists public key parameters of all iden
 
 <https://www.void.gr/kargig/blog/2013/12/02/creating-a-new-gpg-key-with-subkeys/>
 
+<https://www.jfry.me/articles/2015/gpg-smartcard/>
