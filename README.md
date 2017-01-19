@@ -1,3 +1,6 @@
+> *DISCLAIMER: This is just my personal little fork of drduh's original guide, where I update a few things to better suit my personal preferences. You'd be better off to check out the [original article](https://github.com/drduh/YubiKey-Guide) instead.*
+
+
 This is a practical guide to using [YubiKey](https://www.yubico.com/faq/yubikey/) as a [SmartCard](https://security.stackexchange.com/questions/38924/how-does-storing-gpg-ssh-private-keys-on-smart-cards-compare-to-plain-usb-drives) for storing GPG encryption and signing keys.
 
 An authentication key can also be created for SSH and used with [gpg-agent](https://unix.stackexchange.com/questions/188668/how-does-gpg-agent-work/188813#188813).
